@@ -1,0 +1,48 @@
+{
+  "roundNo": 45,
+  "mapInfo": {
+    "width": 41,
+    "height": 32,
+    "zones": [
+      {"pos": {"x": 8, "y": 24}, "neutralType": "stone"},
+      {"pos": {"x": 10, "y": 22}, "neutralType": "vendor"},
+      {"pos": {"x": 14, "y": 18}, "neutralType": "weaponShop"},
+      {"pos": {"x": 6, "y": 24}, "neutralType": "challengerTaskPoint1"}
+    ]
+  },
+  "teamOur": {
+    "type": "challenger",
+    "teamId": "t1",
+    "teamName": "CoreGeek",
+    "goldNum": 75,
+    "totalScore": 0,
+    "playerTasks": [
+      {"taskType": "自进化类1", "taskPosition": {"x": 6, "y": 24}, "coldDownRounds": 0, "scoreReward": 100, "goldReward": 50, "isValid": true, "timeoutRounds": 100}
+    ],
+    "roles": [
+      {"id": 10010, "pos": {"x": 8, "y": 24}, "roleType": "worker", "health": 220, "attackPower": 0, "attackRange": 0, "backPackCapability": 100, "backpack": ["stone"], "level": 0, "cooldown": 0},
+      {"id": 10011, "pos": {"x": 14, "y": 18}, "roleType": "pioneer", "health": 200, "attackPower": 0, "attackRange": 0, "backPackCapability": 40, "backpack": [], "level": 0, "cooldown": 0},
+      {"id": 10012, "pos": {"x": 0, "y": 28}, "roleType": "worker", "health": 220, "attackPower": 0, "attackRange": 0, "backPackCapability": 100, "backpack": [], "level": 0, "cooldown": 0},
+      {"id": 10013, "pos": {"x": 2, "y": 28}, "roleType": "station", "health": 2000, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0},
+      {"id": 10040, "pos": {"x": 1, "y": 27}, "roleType": "rocket", "health": 400, "attackPower": 20, "attackRange": 40, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0}
+    ]
+  },
+  "teamEnemy": {"roles": []},
+  "robot": {"roles": []},
+  "phaseTask": "",
+  "lastRoundRoleActionResults": {},
+  "lastSummonTreasureResult": 0,
+  "llmResp": "",
+  "worldNews": {"officialNews": "", "folkLegends": ""},
+  "lastCmdResult": "",
+  "vendorShopList": [
+    {"name": "stone", "price": 5},
+    {"name": "iron", "price": 12},
+    {"name": "copper", "price": 15}
+  ],
+  "weaponShopList": [
+    {"name": "WeaponUpgradeVoucher1", "price": 100},
+    {"name": "Medicine", "price": 10}
+  ],
+  "errors": []
+}

@@ -103,4 +103,12 @@ public final class Constants {
     public static final int ROBOT_SCORE_MIDDLE = 2;
     public static final int ROBOT_SCORE_LARGE = 4;
     public static final int ROBOT_SCORE_BOSS = 10;
+
+    // ---------- 策略参数 ----------
+    /** 白天最后 10 回合（回合号%130 >= 60）起，角色回武器旁准备夜晚防守 */
+    public static final int NIGHT_PREP_ROUND = 60;
+    /** 围墙血量低于该阈值时，优先使用 WallFixer 修复或围墙升级券升级回满血 */
+    public static final int WALL_REPAIR_THRESHOLD = 300;
+    /** 开拓者一次采购任务用品的种类数（每种 1 个） */
+    public static final int SHOP_TASK_ITEM_KINDS = 3;
 }

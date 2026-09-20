@@ -1,0 +1,84 @@
+<html style="margin:0;padding:0;">
+<title>《未来战争》当前AI策略总览</title>
+<div style="width:100%;box-sizing:border-box;background:#f6f8fb;font-family:'Microsoft YaHei',system-ui,sans-serif;padding:16px;color:#1f2d3d;">
+  <div style="text-align:center;margin-bottom:14px;">
+    <div style="font-size:20px;font-weight:700;color:#1f2d3d;">《未来战争》当前 AI 策略总览</div>
+    <div style="font-size:13px;color:#8492a6;margin-top:4px;">依据 CoreGeek/src/main/java/com/huawei/strategy 实际代码整理 · 2026-09-20（新战术版）</div>
+  </div>
+
+  <div style="border:2px solid #2b6cb0;border-radius:10px;background:#fff;padding:12px 16px;margin-bottom:12px;">
+    <div style="font-weight:700;color:#2b6cb0;margin-bottom:6px;">总调度 DecisionEngine（每回合）</div>
+    <div style="font-size:14px;line-height:1.7;">
+      初始化阵营/基地 → 换日重置 LLM 计数(<span style="color:#8492a6;">refreshDay</span>) → 记忆已知矿点(<span style="color:#8492a6;">recordMines</span>) → 统计武器数(<span style="color:#8492a6;">countWeapons</span>) → 昼夜判定 <b>roundNo%130 &lt; 70</b> 为白天，否则夜晚 → 分发策略；occupiedRoles 防止同一角色被重复分配
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+    <div style="flex:1 1 300px;border:2px solid #d69e2e;border-radius:10px;background:#fffdf5;padding:12px 16px;">
+      <div style="font-weight:700;color:#b7791f;margin-bottom:8px;">白天 DayStrategy</div>
+      <div style="font-size:13px;font-weight:700;color:#975a16;margin-bottom:4px;">工人 WorkerStrategy · 优先级链</div>
+      <ol style="margin:0 0 10px 0;padding-left:20px;font-size:14px;line-height:1.75;">
+        <li><b>白天第 60 回合起 → 回最近武器旁</b>（夜晚前回炮台御敌）</li>
+        <li>围墙血量 &lt;300 且有 WallFixer → 走到墙旁 <b>use 修复</b>（保证围墙血量）</li>
+        <li>武器数 &lt;3 → 基地旁 3 个外角位<b>优先建火箭发射台</b>（开局 3 火箭炮）</li>
+        <li>有石头 → 按阵营<b>建围墙</b>：<b>面向敌人的一面优先</b>（角+两侧边），其次两侧，<b>后方不建</b></li>
+        <li>升级：武器升级券优先（火箭优先，level1→Voucher1/level2→Voucher2）→ 围墙/基地升级券 → 无券且金币≥100 → 商店<b>买武器升级券1</b></li>
+        <li>背包剩余 ≤5 → 走向小贩，按当前收购价<b>卖最值钱矿</b></li>
+        <li>否则 <b>采集最近矿点</b>（移动到矿旁 → collect）</li>
+        <li>无事可做 → 武器商店旁待命</li>
+      </ol>
+      <div style="font-size:13px;font-weight:700;color:#975a16;margin-bottom:4px;">开拓者 PioneerStrategy · 优先级链</div>
+      <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.75;">
+        <li><b>白天第 60 回合起 → 回最近武器旁</b>（夜晚前回基地）</li>
+        <li>调用 TaskSolver <b>专心接任务/交任务</b>（状态机驱动）</li>
+        <li>血量 &lt;60 → 用药；没药且金币≥10 → 商店买 Medicine</li>
+        <li>未开宝藏且背包有任务用品 → 到任务点 <b>召唤宝藏</b></li>
+        <li>到武器商店<b>采购</b>：补 Medicine / 金币≥45 且空间≥3 → 买任务用品（AcientTablet 等 3 种）备用</li>
+        <li>否则 → 任务点旁待命</li>
+      </ol>
+    </div>
+
+    <div style="flex:1 1 300px;border:2px solid #4a5568;border-radius:10px;background:#f7fafc;padding:12px 16px;">
+      <div style="font-weight:700;color:#2d3748;margin-bottom:8px;">夜晚 NightStrategy</div>
+      <div style="font-size:13px;font-weight:700;color:#2d3748;margin-bottom:4px;">1. 战斗优先 CombatStrategy（3 火箭齐射）</div>
+      <div style="font-size:14px;line-height:1.75;margin-bottom:8px;">
+        每座武器：找<b>周围一格内未占用的非建筑角色</b>当操控者（找不到则不攻击）→ 选择目标 → 下发 attack（key=武器ID，controllerId=操控角色）<br>
+        <span style="color:#8492a6;">火箭冷却 cooldown&gt;0 时跳过</span>
+      </div>
+      <div style="font-size:13px;font-weight:700;color:#2d3748;margin-bottom:4px;">2. 角色就位</div>
+      <div style="font-size:14px;line-height:1.75;">
+        未被分配指令的工人/开拓者 → 移动到最近武器旁待命；血量低且有药则先用药
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+    <div style="flex:1 1 300px;border:2px solid #38a169;border-radius:10px;background:#f0fff4;padding:12px 16px;">
+      <div style="font-weight:700;color:#276749;margin-bottom:6px;">战斗目标选择（威胁值 = 基础分 × 当前血量）</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+        <tr style="background:#e6ffed;"><td style="padding:4px 6px;font-weight:700;">加特林 gatling</td><td style="padding:4px 6px;">等级=目标数(1/2/3)，按威胁降序取目标，多目标须落在同一 90° 锥形内，距离 ≤ attackRange</td></tr>
+        <tr><td style="padding:4px 6px;font-weight:700;">电磁炮 railgun</td><td style="padding:4px 6px;">单目标，射程内威胁值最大的机器人（能量穿透）</td></tr>
+        <tr style="background:#e6ffed;"><td style="padding:4px 6px;font-weight:700;">火箭 rocket</td><td style="padding:4px 6px;">等级=导弹数(1/2/3)，选机器人最密集的 3×3 区域，落点中心距 ≤2 视为重叠不重复选</td></tr>
+      </table>
+      <div style="font-size:12.5px;color:#8492a6;margin-top:6px;">目标筛选：优先 targetTeam=己方 的机器人；无则攻击全部可见机器人</div>
+    </div>
+
+    <div style="flex:1 1 300px;border:2px solid #3182ce;border-radius:10px;background:#ebf8ff;padding:12px 16px;">
+      <div style="font-weight:700;color:#2b6cb0;margin-bottom:6px;">自进化任务状态机 TaskSolver</div>
+      <div style="font-size:13.5px;line-height:2;">
+        IDLE → 发现可用任务点(isValid &amp;&amp; 冷却0) → 移动/接取 acceptTask<br>
+        → TASK_ACCEPTED → 构造 prompt 提交 LLM<br>
+        → AWAIT_LLM → 收到 llmResp：有代码块→提交沙盒 executeCmd；仅答案→待提交<br>
+        → AWAIT_CMD → 收到 lastCmdResult（[exitCode:0] 成功）→ 用输出作答案<br>
+        → READY_TO_SUBMIT → 下回合 submitAnswer → SUBMITTED → 回 IDLE<br>
+        <span style="color:#e53e3e;">错误 errorCode=1(超时)/2(答案错) → 重置 IDLE</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="border:1px dashed #cbd5e0;border-radius:8px;background:#fff;padding:10px 14px;">
+    <div style="font-weight:700;color:#4a5568;margin-bottom:4px;">指令合法性预检（避免异常累计出局）</div>
+    <div style="font-size:13.5px;color:#4a5568;line-height:1.7;">夜晚不下发 build/collect · 白天不下发 attack · 仅工人生成 build/collect/remove · 仅开拓者生成 acceptTask/submitAnswer/summonTreasure · 阵亡角色（不在 roles 列表）不下发指令 · 决策异常兜底返回已生成指令而非空响应</div>
+  </div>
+</div>
+</html>
