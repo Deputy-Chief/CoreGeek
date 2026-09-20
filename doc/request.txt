@@ -1,0 +1,89 @@
+{
+  "roundNo": 85,
+  "mapInfo": {
+    "width": 41,
+    "height": 32,
+    "zones": [
+      {"pos": {"x": 8, "y": 24}, "neutralType": "stone"},
+      {"pos": {"x": 12, "y": 20}, "neutralType": "iron"},
+      {"pos": {"x": 16, "y": 16}, "neutralType": "copper"},
+      {"pos": {"x": 10, "y": 22}, "neutralType": "vendor"},
+      {"pos": {"x": 14, "y": 18}, "neutralType": "weaponShop"},
+      {"pos": {"x": 6, "y": 24}, "neutralType": "challengerTaskPoint1"},
+      {"pos": {"x": 8, "y": 22}, "neutralType": "challengerTaskPoint2"},
+      {"pos": {"x": 34, "y": 10}, "neutralType": "defenderTaskPoint1"},
+      {"pos": {"x": 36, "y": 8}, "neutralType": "defenderTaskPoint2"}
+    ]
+  },
+  "teamOur": {
+    "type": "challenger",
+    "teamId": "team_challenger",
+    "teamName": "CoreGeek",
+    "goldNum": 75,
+    "totalScore": 0,
+    "playerTasks": [
+      {
+        "taskType": "自进化类1",
+        "taskPosition": {"x": 6, "y": 24},
+        "coldDownRounds": 0,
+        "scoreReward": 100,
+        "goldReward": 50,
+        "isValid": true,
+        "timeoutRounds": 100
+      },
+      {
+        "taskType": "自进化类2",
+        "taskPosition": {"x": 8, "y": 22},
+        "coldDownRounds": 0,
+        "scoreReward": 120,
+        "goldReward": 60,
+        "isValid": true,
+        "timeoutRounds": 100
+      }
+    ],
+    "roles": [
+      {"id": 10010, "pos": {"x": 5, "y": 28}, "roleType": "worker", "health": 220, "attackPower": 0, "attackRange": 0, "backPackCapability": 100, "backpack": ["stone", "stone"], "level": 0, "cooldown": 0},
+      {"id": 10011, "pos": {"x": 5, "y": 26}, "roleType": "pioneer", "health": 200, "attackPower": 0, "attackRange": 0, "backPackCapability": 40, "backpack": [], "level": 0, "cooldown": 0},
+      {"id": 10012, "pos": {"x": 7, "y": 24}, "roleType": "worker", "health": 220, "attackPower": 0, "attackRange": 0, "backPackCapability": 100, "backpack": [], "level": 0, "cooldown": 0},
+      {"id": 10013, "pos": {"x": 2, "y": 28}, "roleType": "station", "health": 2000, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0},
+      {"id": 10020, "pos": {"x": 6, "y": 27}, "roleType": "gatling", "health": 300, "attackPower": 10, "attackRange": 4, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0}
+    ]
+  },
+  "teamEnemy": {
+    "roles": [
+      {"id": 20013, "pos": {"x": 35, "y": 3}, "roleType": "station", "health": 2000, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0},
+      {"id": 41000, "pos": {"x": 34, "y": 5}, "roleType": "wall", "health": 500, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0},
+      {"id": 41001, "pos": {"x": 35, "y": 5}, "roleType": "wall", "health": 500, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0},
+      {"id": 41002, "pos": {"x": 36, "y": 5}, "roleType": "wall", "health": 500, "attackPower": 0, "attackRange": 0, "backPackCapability": 0, "backpack": [], "level": 1, "cooldown": 0}
+    ]
+  },
+  "robot": {
+    "roles": [
+      {"id": 50001, "pos": {"x": 9, "y": 28}, "roleType": "smallRobot", "health": 40, "abnormalState": "", "targetTeam": "challenger"},
+      {"id": 50002, "pos": {"x": 10, "y": 26}, "roleType": "middleRobot", "health": 60, "abnormalState": "", "targetTeam": "challenger"},
+      {"id": 50003, "pos": {"x": 11, "y": 29}, "roleType": "smallRobot", "health": 40, "abnormalState": "", "targetTeam": "challenger"}
+    ]
+  },
+  "phaseTask": "",
+  "lastRoundRoleActionResults": {},
+  "lastSummonTreasureResult": 0,
+  "llmResp": "",
+  "worldNews": {
+    "officialNews": "矿业管理局紧急通报：北部铁矿区昨夜发生严重矿井塌方事故，明日全面停工。",
+    "folkLegends": "月圆之夜，古符石板与星辰之沙在东北方向的山谷共鸣。"
+  },
+  "lastCmdResult": "",
+  "vendorShopList": [
+    {"name": "stone", "price": 5},
+    {"name": "iron", "price": 12},
+    {"name": "copper", "price": 15}
+  ],
+  "weaponShopList": [
+    {"name": "WeaponUpgradeVoucher1", "price": 100},
+    {"name": "WallUpgradeVoucher1", "price": 20},
+    {"name": "StationUpgradeVoucher1", "price": 100},
+    {"name": "Medicine", "price": 10},
+    {"name": "Bomb", "price": 100}
+  ],
+  "errors": []
+}
