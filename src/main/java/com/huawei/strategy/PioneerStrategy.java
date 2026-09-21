@@ -1,297 +1,138 @@
 package com.huawei.strategy;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import com.google.gson.*;
+import com.huawei.llm.LlmClient;
+import com.huawei.model.*;
+import com.huawei.util.*;
 
-import com.huawei.model.GameContext;
-import com.huawei.model.GameRequest;
-import com.huawei.model.GameResponse;
-import com.huawei.model.PlayerTask;
-import com.huawei.model.Pos;
-import com.huawei.model.Role;
-import com.huawei.model.RoleCommand;
-import com.huawei.model.Zone;
-import com.huawei.util.Constants;
-import com.huawei.util.MapUtil;
-import com.huawei.util.RoleUtil;
-
-/**
- * 开拓者行为逻辑。
- *
- * <p>白天优先级链：
- * <ol>
- *   <li>白天后期（回合号%130 ≥ 60）→ 回最近武器旁，准备夜晚御敌；</li>
- *   <li>自进化任务状态机（专心接任务/交任务）；</li>
- *   <li>血量低 → 用药，没药则到武器商店购买；</li>
- *   <li>未开启宝藏且背包有任务用品 → 召唤宝藏；</li>
- *   <li>到武器商店采购（补 Medicine、买任务用品备用）；</li>
- *   <li>任务点旁待命。</li>
- * </ol>
- * <p>夜晚：血量低用药 → 移动到最近武器旁待命。
- */
+/** 任务优先，累积传闻推理真实祭坛；夜间异步求解与防御并行。 */
 public class PioneerStrategy {
+    private final TaskSolver solver = new TaskSolver();
 
-    private final TaskSolver taskSolver = new TaskSolver();
-
-    public void execute(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                        Set<Integer> occupiedRoles, boolean isDay) {
-        if (pioneer == null) {
-            return;
-        }
-        if (occupiedRoles.contains(pioneer.id)) {
-            return;
-        }
-        if (!RoleUtil.isAlive(request.teamOur.roles, pioneer.id)) {
-            return;
-        }
-
-        if (!isDay) {
-            RoleCommand cmd = decideNightAction(pioneer, response, request, ctx, occupiedRoles);
-            if (cmd != null) {
-                response.roleCommandMap.put(pioneer.id, cmd);
-                occupiedRoles.add(pioneer.id);
-            }
-            return;
-        }
-        int roundInDay = request.roundNo % Constants.ROUNDS_PER_DAY;
-
-        // 0. 白天后期：回最近武器旁，准备夜晚御敌
-        if (roundInDay >= Constants.NIGHT_PREP_ROUND) {
-            RoleCommand cmd = moveToNearestWeapon(pioneer, request, ctx, occupiedRoles);
-            if (cmd != null) {
-                response.roleCommandMap.put(pioneer.id, cmd);
-                occupiedRoles.add(pioneer.id);
-            }
-            return;
-        }
-
-        // 1. 自进化任务状态机（有任务或可接任务时返回指令）
-        List<Pos> obstacles = MapUtil.collectObstacles(request.teamOur.roles, request.teamEnemy.roles,
-                request.robot == null ? null : request.robot.roles, request.mapInfo.zones);
-        RoleCommand taskCmd = taskSolver.solve(pioneer, response, request, ctx, obstacles,
-                request.mapInfo.width, request.mapInfo.height);
-        if (taskCmd != null) {
-            response.roleCommandMap.put(pioneer.id, taskCmd);
-            occupiedRoles.add(pioneer.id);
-            return;
-        }
-
-        // 2. 血量低 → 用药；没药则到商店购买
-        if (pioneer.health < 60) {
-            if (RoleUtil.hasInBackpack(pioneer, Constants.ITEM_MEDICINE)) {
-                response.roleCommandMap.put(pioneer.id, RoleCommand.use(Constants.ITEM_MEDICINE));
-                occupiedRoles.add(pioneer.id);
-                return;
-            }
-            RoleCommand buy = buyAtShop(pioneer, response, request, ctx, occupiedRoles, Constants.ITEM_MEDICINE, 10);
-            if (buy != null) {
-                response.roleCommandMap.put(pioneer.id, buy);
-                occupiedRoles.add(pioneer.id);
-                return;
-            }
-        }
-
-        // 3. 未开启宝藏且背包有任务用品 → 召唤宝藏
-        RoleCommand treasure = trySummonTreasure(pioneer, response, request, ctx, occupiedRoles);
-        if (treasure != null) {
-            response.roleCommandMap.put(pioneer.id, treasure);
-            occupiedRoles.add(pioneer.id);
-            return;
-        }
-
-        // 4. 到武器商店采购：补 Medicine / 买任务用品备用
-        RoleCommand shop = tryShopShopping(pioneer, response, request, ctx, occupiedRoles);
-        if (shop != null) {
-            response.roleCommandMap.put(pioneer.id, shop);
-            occupiedRoles.add(pioneer.id);
-            return;
-        }
-
-        // 5. 否则移动到任务点待命
-        RoleCommand standby = moveToTaskPoint(pioneer, response, request, ctx, occupiedRoles);
-        if (standby != null) {
-            response.roleCommandMap.put(pioneer.id, standby);
-            occupiedRoles.add(pioneer.id);
-        }
-    }
-
-    /** 夜晚：血量低用药品；否则移动到最近武器旁待命 */
-    private RoleCommand decideNightAction(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                                          Set<Integer> occupiedRoles) {
-        if (pioneer.health < 60 && RoleUtil.hasInBackpack(pioneer, Constants.ITEM_MEDICINE)) {
-            return RoleCommand.use(Constants.ITEM_MEDICINE);
-        }
-        return moveToNearestWeapon(pioneer, request, ctx, occupiedRoles);
-    }
-
-    /** 到武器商店采购：背包无药买 Medicine；否则金币充足且背包有空间买任务用品备用 */
-    private RoleCommand tryShopShopping(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                                        Set<Integer> occupiedRoles) {
-        Zone shop = findShop(request);
-        if (shop == null || shop.pos == null) {
-            return null;
-        }
-        // 补 Medicine（血量不满且背包无药）
-        if (pioneer.health < 200 && !RoleUtil.hasInBackpack(pioneer, Constants.ITEM_MEDICINE)
-                && request.teamOur.goldNum >= 10) {
-            if (MapUtil.isAdjacentOrSame(pioneer.pos, shop.pos)) {
-                return RoleCommand.buy(Constants.ITEM_MEDICINE, 1);
-            }
-            return moveToward(pioneer, shop.pos, request, ctx, occupiedRoles);
-        }
-        // 买任务用品备用（金币足够、背包有空间、未开宝藏）
-        if (!ctx.treasureOpened && request.teamOur.goldNum >= 45
-                && RoleUtil.backpackRemaining(pioneer) >= Constants.SHOP_TASK_ITEM_KINDS) {
-            if (MapUtil.isAdjacentOrSame(pioneer.pos, shop.pos)) {
-                return RoleCommand.buy(Constants.ITEM_ANCIENT_TABLET, Constants.SHOP_TASK_ITEM_KINDS);
-            }
-            return moveToward(pioneer, shop.pos, request, ctx, occupiedRoles);
-        }
-        return null;
-    }
-
-    /** 在武器商店旁购买指定物品 */
-    private RoleCommand buyAtShop(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                                  Set<Integer> occupiedRoles, String itemName, int price) {
-        if (request.teamOur.goldNum < price) {
-            return null;
-        }
-        Zone shop = findShop(request);
-        if (shop == null || shop.pos == null) {
-            return null;
-        }
-        if (MapUtil.isAdjacentOrSame(pioneer.pos, shop.pos)) {
-            return RoleCommand.buy(itemName, 1);
-        }
-        return moveToward(pioneer, shop.pos, request, ctx, occupiedRoles);
-    }
-
-    /** 背包有任务用品 → 移动到任务点（作为祭坛位置）→ summonTreasure */
-    private RoleCommand trySummonTreasure(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                                          Set<Integer> occupiedRoles) {
-        if (ctx.treasureOpened) {
-            return null;
-        }
-        List<String> items = collectTreasureItems(pioneer);
-        if (items.isEmpty()) {
-            return null;
-        }
-        PlayerTask task = getFirstTask(request);
-        if (task == null || task.taskPosition == null) {
-            return null;
-        }
-        Pos altar = task.taskPosition;
-        if (MapUtil.isAdjacentOrSame(pioneer.pos, altar)) {
-            ctx.treasureOpened = true;
-            return RoleCommand.summonTreasure(altar, items);
-        }
-        return moveToward(pioneer, altar, request, ctx, occupiedRoles);
-    }
-
-    /** 扫描背包中 6 种任务用品 */
-    private List<String> collectTreasureItems(Role pioneer) {
-        List<String> items = new ArrayList<String>();
-        if (pioneer.backpack == null) {
-            return items;
-        }
-        String[] taskItems = {
-                Constants.ITEM_ANCIENT_TABLET, Constants.ITEM_STAR_SAND,
-                Constants.ITEM_FLAME_BREATH, Constants.ITEM_FROST_POTION,
-                Constants.ITEM_THORN_AMULET, Constants.ITEM_IRON_WHISTLE
-        };
-        for (String s : pioneer.backpack) {
-            for (String item : taskItems) {
-                if (item.equals(s)) {
-                    items.add(s);
-                    break;
+    public void execute(Role p, GameResponse res, GameRequest req, GameContext ctx, Set<Integer> used, boolean day) {
+        if (p == null) return;
+        receiveTreasure(req, ctx);
+        boolean active = req.phaseTask != null && !req.phaseTask.trim().isEmpty();
+        boolean defending = !day || StrategySupport.prepareNight(p, req, ctx);
+        RoleCommand emergency = used.contains(p.id) ? null : StrategySupport.emergency(p, req, ctx, !day);
+        // 宝藏推理和任务解题共享一个异步响应通道，用明确状态防止串线。
+        if (!active && (ctx.taskState == GameContext.TaskState.IDLE
+                || ctx.taskState == GameContext.TaskState.MOVING_TO_TASK_POINT
+                || ctx.taskState == GameContext.TaskState.SUBMITTED)) inferTreasure(res, req, ctx);
+        boolean treasureTrip = !active && ctx.currentDay >= 5 && !ctx.treasureOpened && ctx.treasurePos != null
+                && req.roundNo >= ctx.treasureRetryRound && ctx.currentDay + 1 >= ctx.treasureDay
+                && canSupplyTreasure(p, req, ctx);
+        RoleCommand task = solver.solve(p, res, req, ctx, !used.contains(p.id) && emergency == null
+                && !defending && !treasureTrip);
+        if (used.contains(p.id)) return;
+        RoleCommand cmd = emergency;
+        if (cmd == null && defending) cmd = StrategySupport.defend(p, req, ctx);
+        if (cmd == null && !defending) {
+            cmd = task;
+            if (cmd == null && treasureTrip) cmd = treasure(p, req, ctx);
+            if (cmd == null && p.health < Constants.PIONEER_HP * 3 / 10)
+                cmd = StrategySupport.buy(p, Constants.ITEM_MEDICINE, req, ctx, 0);
+            // 任务点均冷却时利用空档备齐六种用品，每种一件。
+            if (cmd == null && !active && ctx.currentDay >= 2 && !ctx.treasureOpened
+                    && ctx.taskState == GameContext.TaskState.IDLE && EconomyStrategy.defenseReady(req)) {
+                for (String item : StrategySupport.TASK_ITEMS) if (!RoleUtil.hasInBackpack(p, item)) {
+                    cmd = StrategySupport.buy(p, item, req, ctx, 150);
+                    if (cmd != null) break;
                 }
             }
         }
-        return items;
+        StrategySupport.emit(p, cmd, res, ctx, used);
     }
 
-    /** 移动到任务点 1 坐标待命 */
-    private RoleCommand moveToTaskPoint(Role pioneer, GameResponse response, GameRequest request, GameContext ctx,
-                                        Set<Integer> occupiedRoles) {
-        PlayerTask task = getFirstTask(request);
-        if (task == null || task.taskPosition == null) {
-            return null;
-        }
-        Pos target = task.taskPosition;
-        if (MapUtil.isAdjacentOrSame(pioneer.pos, target)) {
-            return null;
-        }
-        return moveToward(pioneer, target, request, ctx, occupiedRoles);
+    private void inferTreasure(GameResponse res, GameRequest req, GameContext ctx) {
+        if (ctx.treasureOpened || ctx.treasureAwaitingLlm || ctx.currentDay < 2 || ctx.folkHistory.length() == 0
+                || ctx.treasureInferenceDay == ctx.currentDay || !LlmClient.canCallLlm(ctx, false)) return;
+        WorldNews history = new WorldNews();
+        history.folkLegends = ctx.folkHistory.toString();
+        res.prompt = LlmClient.buildTreasurePrompt(history, ctx.treasureFeedback);
+        ctx.llmCallCountToday++;
+        ctx.treasureAwaitingLlm = true;
+        ctx.treasureLlmRound = req.roundNo;
+        ctx.treasureInferenceDay = ctx.currentDay;
     }
 
-    /** 移动到最近武器旁；已在旁则返回 null（待命） */
-    private RoleCommand moveToNearestWeapon(Role pioneer, GameRequest request, GameContext ctx,
-                                            Set<Integer> occupiedRoles) {
-        Role weapon = findNearestWeapon(request, pioneer.pos);
-        if (weapon == null) {
-            return null;
+    private void receiveTreasure(GameRequest req, GameContext ctx) {
+        if (ctx.treasureAttemptRound >= 0 && req.roundNo > ctx.treasureAttemptRound) {
+            int code = req.lastSummonTreasureResult;
+            if (code == 1 || code == 4) ctx.treasureOpened = true;
+            else if (code == 2) ctx.treasureRetryRound = req.roundNo + 10;
+            else if (code == 3) {
+                ctx.treasureFeedback = "祭坛" + ctx.treasurePos + "献祭" + ctx.treasureItems + "返回物品错误，请重新推断组合。";
+                ctx.treasurePos = null;
+                ctx.treasureItems.clear();
+                ctx.treasureInferenceDay = -1;
+            } else ctx.treasureRetryRound = req.roundNo + 3;
+            ctx.treasureAttemptRound = -1;
         }
-        if (MapUtil.isAdjacent(pioneer.pos, weapon.pos)) {
-            return null;
-        }
-        return moveToward(pioneer, weapon.pos, request, ctx, occupiedRoles);
-    }
-
-    private PlayerTask getFirstTask(GameRequest request) {
-        if (request.teamOur == null || request.teamOur.playerTasks == null
-                || request.teamOur.playerTasks.isEmpty()) {
-            return null;
-        }
-        return request.teamOur.playerTasks.get(0);
-    }
-
-    private Zone findShop(GameRequest request) {
-        if (request.mapInfo == null || request.mapInfo.zones == null) {
-            return null;
-        }
-        List<Zone> shops = MapUtil.findZones(request.mapInfo.zones, Constants.NEUTRAL_WEAPON_SHOP);
-        return shops.isEmpty() ? null : shops.get(0);
-    }
-
-    /** 查找离 pos 最近的武器工事 */
-    private Role findNearestWeapon(GameRequest request, Pos pos) {
-        Role best = null;
-        int bestDist = Integer.MAX_VALUE;
-        if (request.teamOur == null || request.teamOur.roles == null) {
-            return null;
-        }
-        for (Role r : request.teamOur.roles) {
-            if (r == null || r.pos == null || !isWeapon(r.roleType)) {
-                continue;
+        if (!ctx.treasureAwaitingLlm || req.roundNo <= ctx.treasureLlmRound) return;
+        if (req.llmResp == null || req.llmResp.trim().isEmpty()) {
+            if (req.roundNo - ctx.treasureLlmRound >= 3) {
+                ctx.treasureAwaitingLlm = false;
+                ctx.treasureInferenceDay = -1;
             }
-            int d = MapUtil.chebyshev(r.pos, pos);
-            if (d < bestDist) {
-                bestDist = d;
-                best = r;
+            return;
+        }
+        ctx.treasureAwaitingLlm = false;
+        JsonObject json = LlmClient.parseObject(req.llmResp);
+        if (json == null) return;
+        try {
+            JsonObject position = json.getAsJsonObject("position");
+            if (position == null) return;
+            Pos pos = new Pos(integer(position, "x"), integer(position, "y"));
+            int day = integer(json, "day");
+            int time = json.has("roundInDay") ? integer(json, "roundInDay") : 0;
+            if (!MapUtil.isValidPos(pos, req.mapInfo.width, req.mapInfo.height) || day < 1 || day > 10
+                    || time < 0 || time >= Constants.ROUNDS_PER_DAY) return;
+            List<String> items = new ArrayList<String>();
+            JsonArray array = json.getAsJsonArray("items");
+            if (array == null || array.size() == 0 || array.size() > Constants.PIONEER_BACKPACK) return;
+            for (JsonElement item : array) {
+                String value = item.getAsString();
+                if (!Arrays.asList(StrategySupport.TASK_ITEMS).contains(value)) return;
+                items.add(value);
             }
-        }
-        return best;
+            ctx.treasurePos = pos;
+            ctx.treasureDay = day;
+            ctx.treasureRoundInDay = time;
+            ctx.treasureItems.clear(); ctx.treasureItems.addAll(items);
+        } catch (RuntimeException ignored) { /* 不完整推理不能生成游戏指令。 */ }
     }
 
-    /** 向目标移动一步（考虑障碍物） */
-    private RoleCommand moveToward(Role role, Pos target, GameRequest request, GameContext ctx,
-                                   Set<Integer> occupiedRoles) {
-        if (target == null) {
-            return null;
-        }
-        List<Pos> obstacles = MapUtil.collectObstacles(request.teamOur.roles, request.teamEnemy.roles,
-                request.robot == null ? null : request.robot.roles, request.mapInfo.zones);
-        Pos next = MapUtil.nextStepToward(role.pos, target, obstacles, request.mapInfo.width, request.mapInfo.height);
-        if (next == null || next.equals(role.pos)) {
-            return null;
-        }
-        return RoleCommand.move(next);
+    private int integer(JsonObject obj, String key) {
+        return obj.get(key).getAsBigDecimal().intValueExact();
     }
 
-    private boolean isWeapon(String roleType) {
-        return Constants.ROLE_GATLING.equals(roleType)
-                || Constants.ROLE_RAILGUN.equals(roleType)
-                || Constants.ROLE_ROCKET.equals(roleType);
+    private RoleCommand treasure(Role p, GameRequest req, GameContext ctx) {
+        if (ctx.treasurePos == null || ctx.treasureItems.isEmpty()) return null;
+        Map<String, Integer> needed = new LinkedHashMap<String, Integer>();
+        for (String item : ctx.treasureItems) needed.put(item, needed.getOrDefault(item, 0) + 1);
+        for (Map.Entry<String, Integer> item : needed.entrySet()) {
+            if (RoleUtil.countInBackpack(p, item.getKey()) < item.getValue())
+                return StrategySupport.buy(p, item.getKey(), req, ctx, EconomyStrategy.defenseReady(req) ? 0 : 150);
+        }
+        if (!MapUtil.isAdjacent(p.pos, ctx.treasurePos)) return StrategySupport.move(p, ctx.treasurePos, req, ctx);
+        int due = (ctx.treasureDay - 1) * Constants.ROUNDS_PER_DAY + ctx.treasureRoundInDay;
+        if (req.roundNo < due) return null;
+        ctx.treasureAttemptRound = req.roundNo;
+        return RoleCommand.summonTreasure(ctx.treasurePos, new ArrayList<String>(ctx.treasureItems));
+    }
+
+    private boolean canSupplyTreasure(Role p, GameRequest req, GameContext ctx) {
+        List<String> bag = new ArrayList<String>(p.backpack == null ? Collections.<String>emptyList() : p.backpack);
+        int cost = 0, slots = 0;
+        for (String item : ctx.treasureItems) if (!bag.remove(item)) {
+            int price = StrategySupport.price(req.weaponShopList, item);
+            if (price < 0) return false;
+            cost += price; slots++;
+        }
+        return slots <= RoleUtil.backpackRemaining(p) && (slots == 0 ||
+                (StrategySupport.nearestZone(p, req, Constants.NEUTRAL_WEAPON_SHOP) != null
+                && ctx.availableGold >= cost + (EconomyStrategy.defenseReady(req) ? 0 : 150)));
     }
 }

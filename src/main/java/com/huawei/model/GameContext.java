@@ -54,17 +54,56 @@ public class GameContext {
     /** 工人状态（采集/运输） */
     public Map<Integer, Boolean> workerMining = new HashMap<Integer, Boolean>();
 
+    public int lastRound = -1;
+    public String teamId;
+    public int availableGold;
+    public int summonCountToday;
+    public final Set<Pos> reservedTiles = new HashSet<Pos>();
+    public final Set<Integer> reservedBuildings = new HashSet<Integer>();
+    public final Set<String> plannedWeapons = new HashSet<String>();
+    public final Map<Integer, Integer> weaponAssignments = new HashMap<Integer, Integer>();
+    public final Set<Integer> wallBuilders = new HashSet<Integer>();
+    public final Set<String> newsSeen = new HashSet<String>();
+    public final StringBuilder folkHistory = new StringBuilder();
+    public final Map<String, Integer> holdUntilDay = new HashMap<String, Integer>();
+    public final Map<String, Integer> unavailableUntilDay = new HashMap<String, Integer>();
+    public final Map<String, Integer> previousPrices = new HashMap<String, Integer>();
+    public final Set<String> fallingOres = new HashSet<String>();
+    public int lastTaskPointIdx = -1;
+    public int taskRequestRound;
+    public String taskDescription = "";
+    public String taskType = "";
+    public String taskFeedback = "";
+    public String taskSolutionScript = "";
+    /** 只将判题确认成功的脚本收入 SOP；同类新题交给 LLM 参数化。 */
+    public final Map<String, String> taskScripts = new HashMap<String, String>();
+    public final Map<String, String> exactTaskScripts = new HashMap<String, String>();
+    public boolean reusedScript;
+    public boolean treasureAwaitingLlm;
+    public int treasureLlmRound;
+    public int treasureInferenceDay = -1;
+    public int treasureRetryRound;
+    public int treasureAttemptRound = -1;
+    public Pos treasurePos;
+    public int treasureDay;
+    public int treasureRoundInDay;
+    public final java.util.List<String> treasureItems = new java.util.ArrayList<String>();
+    public String treasureFeedback = "";
+
     /** 检测换日，重置当日 LLM 计数 */
     public void refreshDay(int roundNo) {
         int day = MapUtil.getDay(roundNo);
         if (day != currentDay) {
             currentDay = day;
             llmCallCountToday = 0;
+            summonCountToday = 0;
+            fallingOres.clear();
         }
     }
 
     /** 将 zones 中的矿点记录到 knownMines（矿点会消失并随机刷新，需跨回合记忆） */
     public void recordMines(MapInfo mapInfo) {
+        knownMines.clear(); // 全图矿点来自当前快照，失效矿点不能继续导航。
         if (mapInfo == null || mapInfo.zones == null) {
             return;
         }

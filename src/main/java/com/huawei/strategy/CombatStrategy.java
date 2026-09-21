@@ -1,269 +1,161 @@
 package com.huawei.strategy;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import com.huawei.model.*;
+import com.huawei.util.*;
 
-import com.huawei.model.GameContext;
-import com.huawei.model.GameRequest;
-import com.huawei.model.GameResponse;
-import com.huawei.model.Pos;
-import com.huawei.model.RobotRole;
-import com.huawei.model.Role;
-import com.huawei.model.RoleCommand;
-import com.huawei.util.Constants;
-import com.huawei.util.MapUtil;
-
-/**
- * 武器操控与目标选择。
- *
- * <p>目标筛选：优先攻击 targetTeam 为我方的机器人，无则攻击全部可见机器人。
- * <p>威胁值：机器人基础分 × 当前血量（BOSS 10 &gt; 大型 4 &gt; 中型 2 &gt; 小型 1）。
- * <p>指令格式：roleCommandMap 的 key 为武器 ID，controllerId 为操控角色 ID。
- */
+/** 生存优先；按武器特性选择有效伤害、击杀和防御收益最高的目标。 */
 public class CombatStrategy {
-
-    public void execute(GameResponse response, GameRequest request, GameContext ctx, Set<Integer> occupiedRoles) {
-        if (request.robot == null || request.robot.roles == null || request.robot.roles.isEmpty()) {
-            return;
-        }
-        if (request.teamOur == null || request.teamOur.roles == null) {
-            return;
-        }
-        List<RobotRole> targets = filterTargetRobots(request.robot.roles, ctx.teamType);
-        if (targets.isEmpty()) {
-            return;
-        }
-
-        for (Role weapon : request.teamOur.roles) {
-            if (weapon == null || weapon.pos == null || !isWeapon(weapon.roleType)) {
-                continue;
-            }
-            // 火箭发射台 3 回合冷却
-            if (Constants.ROLE_ROCKET.equals(weapon.roleType) && weapon.cooldown > 0) {
-                continue;
-            }
-            Role controller = findController(weapon, request, occupiedRoles);
-            if (controller == null) {
-                continue;
-            }
-            List<Pos> aim = selectTargets(weapon, targets);
-            if (aim == null || aim.isEmpty()) {
-                continue;
-            }
-            RoleCommand cmd = RoleCommand.attack(String.valueOf(controller.id), aim);
-            response.roleCommandMap.put(weapon.id, cmd);
-            occupiedRoles.add(controller.id);
+    public void execute(GameResponse res, GameRequest req, GameContext ctx, Set<Integer> used) {
+        for (Role r : StrategySupport.actors(req))
+            StrategySupport.emit(r, StrategySupport.emergency(r, req, ctx, true), res, ctx, used);
+        List<RobotRole> bots = new ArrayList<RobotRole>();
+        if (req.robot != null && req.robot.roles != null) for (RobotRole b : req.robot.roles)
+            if (b != null && b.pos != null && b.health > 0) bots.add(b);
+        if (bots.isEmpty()) return;
+        for (Role w : req.teamOur.roles) {
+            if (!StrategySupport.weapon(w) || w.pos == null || w.cooldown > 0) continue;
+            Role controller = controller(w, req, ctx, used);
+            if (controller == null) continue;
+            List<Pos> aim = Constants.ROLE_GATLING.equals(w.roleType) ? gatling(w, bots, ctx)
+                    : Constants.ROLE_RAILGUN.equals(w.roleType) ? railgun(w, bots, ctx) : rocket(w, bots, req, ctx);
+            if (aim.isEmpty()) continue;
+            res.roleCommandMap.put(w.id, RoleCommand.attack(String.valueOf(controller.id), aim));
+            used.add(controller.id);
         }
     }
 
-    /** 筛选 targetTeam 为我方的机器人；无则返回全部可见机器人 */
-    private List<RobotRole> filterTargetRobots(List<RobotRole> robots, String teamType) {
-        List<RobotRole> mine = new ArrayList<RobotRole>();
-        for (RobotRole r : robots) {
-            if (r != null && teamType != null && teamType.equals(r.targetTeam)) {
-                mine.add(r);
-            }
+    private Role controller(Role w, GameRequest req, GameContext ctx, Set<Integer> used) {
+        Role fallback = null;
+        for (Role r : StrategySupport.actors(req)) {
+            if (used.contains(r.id) || !MapUtil.isAdjacent(r.pos, w.pos)) continue;
+            Role assigned = StrategySupport.assignedWeapon(r, req, ctx);
+            if (assigned != null && assigned.id == w.id) return r;
+            // 不抢走已就位的其他武器操控者。
+            if (assigned == null || !MapUtil.isAdjacent(r.pos, assigned.pos)) fallback = r;
         }
-        return mine.isEmpty() ? robots : mine;
+        return fallback;
     }
 
-    /** 找武器周围一格内的非建筑、未占用角色；无则返回 null（本回合不攻击，待角色移动到武器旁） */
-    private Role findController(Role weapon, GameRequest request, Set<Integer> occupiedRoles) {
-        Role best = null;
-        int bestDist = Integer.MAX_VALUE;
-        for (Role r : request.teamOur.roles) {
-            if (r == null || r.pos == null || isBuilding(r.roleType)) {
-                continue;
-            }
-            if (occupiedRoles.contains(r.id)) {
-                continue;
-            }
-            int d = MapUtil.chebyshev(r.pos, weapon.pos);
-            if (d < bestDist) {
-                bestDist = d;
-                best = r;
-            }
-        }
-        // 操控者必须站在武器周围一格内
-        if (best != null && bestDist <= 1) {
-            return best;
-        }
-        return null;
+    private double priority(RobotRole b, GameContext ctx) {
+        double p = ctx.teamType.equals(b.targetTeam) ? 100 : 1;
+        if (ctx.stationPos != null) p *= 1 + 6.0 / (1 + MapUtil.chebyshev(b.pos, ctx.stationPos));
+        return p;
     }
 
-    /** 按武器类型选择攻击目标 */
-    private List<Pos> selectTargets(Role weapon, List<RobotRole> targets) {
-        if (Constants.ROLE_GATLING.equals(weapon.roleType)) {
-            return selectGatlingTargets(weapon, targets);
-        }
-        if (Constants.ROLE_RAILGUN.equals(weapon.roleType)) {
-            return selectRailgunTarget(weapon, targets);
-        }
-        if (Constants.ROLE_ROCKET.equals(weapon.roleType)) {
-            return selectRocketTargets(weapon, targets);
-        }
-        return null;
+    private int points(RobotRole b) {
+        return Constants.ROBOT_BOSS.equals(b.roleType) ? 10 : Constants.ROBOT_LARGE.equals(b.roleType) ? 4
+                : Constants.ROBOT_MIDDLE.equals(b.roleType) ? 2 : 1;
     }
 
-    /** 加特林：等级决定目标数（1/2/3），多目标须在同一 90° 锥形内，按威胁值排序 */
-    private List<Pos> selectGatlingTargets(Role weapon, List<RobotRole> targets) {
-        int maxTargets = Math.max(1, weapon.level);
-        List<RobotRole> sorted = sortByThreatDesc(targets);
-        List<Pos> result = new ArrayList<Pos>();
-        for (RobotRole r : sorted) {
-            if (result.size() >= maxTargets) {
-                break;
+    private List<Pos> gatling(Role w, List<RobotRole> bots, GameContext ctx) {
+        List<RobotRole> visible = new ArrayList<RobotRole>();
+        for (RobotRole b : bots) if (MapUtil.chebyshev(w.pos, b.pos) <= w.attackRange) visible.add(b);
+        List<Pos> best = new ArrayList<Pos>();
+        double bestScore = -1;
+        // 枚举锥形起始边界，避免贪心首目标导致漏掉另一侧的小型集群。
+        for (RobotRole edge : visible) {
+            final double start = angle(w.pos, edge.pos);
+            List<RobotRole> cone = new ArrayList<RobotRole>();
+            for (RobotRole b : visible) if (positiveAngle(angle(w.pos, b.pos) - start) <= Math.PI / 2 + 1e-9) cone.add(b);
+            Collections.sort(cone, (a, b) -> Double.compare(gatlingValue(b, ctx), gatlingValue(a, ctx)));
+            List<Pos> aim = new ArrayList<Pos>();
+            double score = 0;
+            for (RobotRole b : cone) {
+                if (aim.size() >= Math.min(3, Math.max(1, w.level))) break;
+                // 子弹被弹道上最近机器人截获，按真实首个命中计分。
+                RobotRole first = firstHit(w.pos, b.pos, bots);
+                if (first != b) continue;
+                aim.add(b.pos); score += gatlingValue(b, ctx);
             }
-            if (r.health <= 0) {
-                continue;
+            if (score > bestScore) { bestScore = score; best = aim; }
+        }
+        return best;
+    }
+
+    private double gatlingValue(RobotRole b, GameContext ctx) {
+        return priority(b, ctx) * (points(b) <= 2 ? 30 + points(b) : 2)
+                * (b.health <= 10 ? 3 : 1);
+    }
+
+    private List<Pos> railgun(Role w, List<RobotRole> bots, GameContext ctx) {
+        Pos best = null;
+        double bestScore = -1;
+        for (RobotRole endpoint : bots) {
+            if (MapUtil.chebyshev(w.pos, endpoint.pos) > w.attackRange) continue;
+            List<RobotRole> line = lineHits(w.pos, endpoint.pos, bots);
+            int energy = Math.max(1, w.attackPower);
+            double score = 0;
+            for (RobotRole b : line) {
+                int damage = Math.min(energy, b.health);
+                score += priority(b, ctx) * (damage + (damage == b.health ? 40 * points(b) : 0));
+                energy -= damage;
+                if (energy == 0) break;
             }
-            if (MapUtil.chebyshev(weapon.pos, r.pos) > weapon.attackRange) {
-                continue;
-            }
-            boolean inCone = true;
-            for (Pos p : result) {
-                if (angleDiffDeg(weapon.pos, p, r.pos) > 90.0) {
-                    inCone = false;
-                    break;
+            if (score > bestScore) { bestScore = score; best = endpoint.pos; }
+        }
+        return best == null ? Collections.<Pos>emptyList() : Collections.singletonList(best);
+    }
+
+    private List<Pos> rocket(Role w, List<RobotRole> bots, GameRequest req, GameContext ctx) {
+        Set<Pos> candidates = new LinkedHashSet<Pos>();
+        for (RobotRole b : bots) for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) {
+            Pos p = new Pos(b.pos.x + dx, b.pos.y + dy);
+            if (MapUtil.isValidPos(p, req.mapInfo.width, req.mapInfo.height)) candidates.add(p);
+        }
+        List<Pos> aim = new ArrayList<Pos>();
+        Map<Integer, Integer> damageSoFar = new HashMap<Integer, Integer>();
+        for (int shot = 0; shot < Math.min(3, Math.max(1, w.level)); shot++) {
+            Pos best = null;
+            double bestScore = 0;
+            for (Pos p : candidates) {
+                double score = 0;
+                for (RobotRole b : bots) {
+                    int remaining = b.health - damageSoFar.getOrDefault(b.id, 0);
+                    int damage = Math.min(Math.max(0, remaining), blast(p, b.pos));
+                    score += priority(b, ctx) * (damage + (damage > 0 && damage == remaining ? 30 * points(b) : 0));
                 }
+                if (score > bestScore) { bestScore = score; best = p; }
             }
-            if (inCone) {
-                result.add(r.pos);
-            }
+            if (best == null) break;
+            aim.add(best); // 允许重复落点：三级火箭可叠加60中心伤害。
+            for (RobotRole b : bots) damageSoFar.put(b.id, damageSoFar.getOrDefault(b.id, 0) + blast(best, b.pos));
         }
-        return result;
+        return aim;
     }
 
-    /** 电磁炮：单目标，选攻击距离内威胁最大的机器人 */
-    private List<Pos> selectRailgunTarget(Role weapon, List<RobotRole> targets) {
-        RobotRole best = null;
-        int bestThreat = -1;
-        for (RobotRole r : targets) {
-            if (r.health <= 0) {
-                continue;
-            }
-            if (MapUtil.chebyshev(weapon.pos, r.pos) > weapon.attackRange) {
-                continue;
-            }
-            int threat = getRobotThreat(r);
-            if (threat > bestThreat) {
-                bestThreat = threat;
-                best = r;
-            }
-        }
-        if (best == null) {
-            return null;
-        }
-        List<Pos> result = new ArrayList<Pos>();
-        result.add(best.pos);
-        return result;
+    private int blast(Pos center, Pos p) { return center.equals(p) ? 20 : MapUtil.isAdjacent(center, p) ? 10 : 0; }
+    private double angle(Pos from, Pos to) { return Math.atan2(to.y - from.y, to.x - from.x); }
+    private double positiveAngle(double a) { return (a + 2 * Math.PI) % (2 * Math.PI); }
+
+    private RobotRole firstHit(Pos from, Pos to, List<RobotRole> bots) {
+        List<RobotRole> line = lineHits(from, to, bots);
+        return line.isEmpty() ? null : line.get(0);
     }
 
-    /** 火箭：等级决定导弹数（1/2/3），选机器人最密集的 3×3 区域，落点互不重叠 */
-    private List<Pos> selectRocketTargets(Role weapon, List<RobotRole> targets) {
-        int missiles = Math.max(1, weapon.level);
-        List<Pos> candidates = new ArrayList<Pos>();
-        for (RobotRole r : targets) {
-            if (r.health > 0 && r.pos != null) {
-                candidates.add(r.pos);
+    private List<RobotRole> lineHits(Pos from, Pos to, List<RobotRole> bots) {
+        List<RobotRole> line = new ArrayList<RobotRole>();
+        for (RobotRole b : bots) if (intersects(from, to, b.pos)) line.add(b);
+        Collections.sort(line, Comparator.comparingDouble(b -> distanceSquared(from, b.pos)));
+        return line;
+    }
+
+    private double distanceSquared(Pos a, Pos b) {
+        return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
+    }
+
+    /** 线段和机器人所在格相交，匹配格中心连线的弹道规则。 */
+    private boolean intersects(Pos from, Pos to, Pos cell) {
+        double lo = 0, hi = 1;
+        int[] a = {from.x, from.y}, d = {to.x - from.x, to.y - from.y}, c = {cell.x, cell.y};
+        for (int axis = 0; axis < 2; axis++) {
+            if (d[axis] == 0) { if (Math.abs(a[axis] - c[axis]) > 0.5) return false; }
+            else {
+                double t1 = (c[axis] - 0.5 - a[axis]) / d[axis], t2 = (c[axis] + 0.5 - a[axis]) / d[axis];
+                lo = Math.max(lo, Math.min(t1, t2)); hi = Math.min(hi, Math.max(t1, t2));
+                if (lo > hi) return false;
             }
         }
-        List<Pos> result = new ArrayList<Pos>();
-        while (result.size() < missiles) {
-            Pos bestCenter = null;
-            int bestCount = -1;
-            for (Pos c : candidates) {
-                if (overlapsSelected(c, result)) {
-                    continue;
-                }
-                int count = countRobotsInArea(c, targets);
-                if (count > bestCount) {
-                    bestCount = count;
-                    bestCenter = c;
-                }
-            }
-            if (bestCenter == null) {
-                break;
-            }
-            result.add(bestCenter);
-        }
-        return result;
-    }
-
-    /** 统计中心点周围 8 格（3×3）内存活机器人数 */
-    private int countRobotsInArea(Pos center, List<RobotRole> targets) {
-        int count = 0;
-        for (RobotRole r : targets) {
-            if (r.health <= 0) {
-                continue;
-            }
-            if (MapUtil.chebyshev(center, r.pos) <= 1) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    /** 新落点与已选落点的 3×3 溅射区是否重叠（中心距离 <= 2 视为重叠） */
-    private boolean overlapsSelected(Pos center, List<Pos> selected) {
-        for (Pos s : selected) {
-            if (MapUtil.chebyshev(center, s) <= 2) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 按威胁值降序排列机器人 */
-    private List<RobotRole> sortByThreatDesc(List<RobotRole> targets) {
-        List<RobotRole> list = new ArrayList<RobotRole>(targets);
-        Collections.sort(list, new Comparator<RobotRole>() {
-            @Override
-            public int compare(RobotRole a, RobotRole b) {
-                return getRobotThreat(b) - getRobotThreat(a);
-            }
-        });
-        return list;
-    }
-
-    /** 威胁值 = 机器人基础分 × 当前血量 */
-    private int getRobotThreat(RobotRole r) {
-        int base;
-        if (Constants.ROBOT_BOSS.equals(r.roleType)) {
-            base = Constants.ROBOT_SCORE_BOSS;
-        } else if (Constants.ROBOT_LARGE.equals(r.roleType)) {
-            base = Constants.ROBOT_SCORE_LARGE;
-        } else if (Constants.ROBOT_MIDDLE.equals(r.roleType)) {
-            base = Constants.ROBOT_SCORE_MIDDLE;
-        } else {
-            base = Constants.ROBOT_SCORE_SMALL;
-        }
-        return base * Math.max(0, r.health);
-    }
-
-    /** 两个目标相对中心点的方向夹角（度），归一化到 [0, 180] */
-    private double angleDiffDeg(Pos from, Pos a, Pos b) {
-        double angleA = Math.atan2(a.y - from.y, a.x - from.x);
-        double angleB = Math.atan2(b.y - from.y, b.x - from.x);
-        double diff = Math.abs(angleA - angleB);
-        while (diff > Math.PI) {
-            diff = 2 * Math.PI - diff;
-        }
-        return Math.toDegrees(diff);
-    }
-
-    private boolean isWeapon(String roleType) {
-        return Constants.ROLE_GATLING.equals(roleType)
-                || Constants.ROLE_RAILGUN.equals(roleType)
-                || Constants.ROLE_ROCKET.equals(roleType);
-    }
-
-    private boolean isBuilding(String roleType) {
-        return isWeapon(roleType)
-                || Constants.ROLE_STATION.equals(roleType)
-                || Constants.ROLE_WALL.equals(roleType);
+        return hi > 0;
     }
 }

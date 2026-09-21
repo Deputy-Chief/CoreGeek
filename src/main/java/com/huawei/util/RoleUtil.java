@@ -56,7 +56,7 @@ public final class RoleUtil {
 
     /** 统计背包中指定物品数量 */
     public static int countInBackpack(Role role, String itemName) {
-        if (role == null || role.backpack == null) {
+        if (role == null || role.backpack == null || itemName == null) {
             return 0;
         }
         int count = 0;

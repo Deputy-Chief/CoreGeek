@@ -11,6 +11,8 @@ public class Role {
     public Pos pos;
     public String roleType;
     public int health;
+    /** 可选扩展字段；老接口未提供时为0，围墙使用集中配置的回退值。 */
+    public int maxHealth;
     public int attackPower;
     public int attackRange;
     public int backPackCapability;

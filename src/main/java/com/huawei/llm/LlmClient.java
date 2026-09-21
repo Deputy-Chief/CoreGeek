@@ -2,6 +2,8 @@ package com.huawei.llm;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.google.gson.*;
+import com.huawei.sandbox.SandboxExecutor;
 
 import com.huawei.model.GameContext;
 import com.huawei.model.WorldNews;
@@ -12,7 +14,7 @@ import com.huawei.model.WorldNews;
 public final class LlmClient {
 
     private static final Pattern CODE_BLOCK_PATTERN =
-            Pattern.compile("```(?:bash|python|sh|shell)?\\s*\\r?\\n?([\\s\\S]*?)```");
+            Pattern.compile("```(bash|python|sh|shell)?[ \\t]*\\r?\\n([\\s\\S]*?)```");
 
     private LlmClient() {
     }
@@ -37,8 +39,10 @@ public final class LlmClient {
             sb.append("上次返回：\n").append(lastLlmResp).append("\n\n");
         }
         sb.append("输出要求：\n");
-        sb.append("1. 如果需要执行沙盒命令，请用 ```bash 或 ```python 代码块给出命令，我会代为执行并回传结果。\n");
-        sb.append("2. 如果已经可以得出答案，请直接给出最终答案文本（不要包裹在代码块中）。");
+        sb.append("仅返回 JSON：{\"answer\":\"最终答案或空串\",\"command\":\"shell命令或空串\",\"language\":\"shell或python\"}。\n");
+        sb.append("查询/探索命令的输出会回传给你继续推理，不直接作为答案。\n");
+        sb.append("能直接求解的脚本请只输出 JSON {\"answer\":\"最终答案\"}，以减少回合。\n");
+        sb.append("命令超时15秒；复用提供的成功脚本时必须按当前题目更新参数，不能沿用旧题答案。");
         return sb.toString();
     }
 
@@ -51,7 +55,9 @@ public final class LlmClient {
         if (lastLlmResp != null && !lastLlmResp.isEmpty()) {
             sb.append("上次返回：\n").append(lastLlmResp).append("\n\n");
         }
-        sb.append("请以 JSON 格式回答：{\"position\":{\"x\":..,\"y\":..},\"items\":[\"..\"],\"day\":..}");
+        sb.append("仅在全部条件明确时回答 JSON：{\"position\":{\"x\":..,\"y\":..},\"items\":[\"..\"],\"day\":1,\"roundInDay\":0}，day为1到10，roundInDay为0到129。未知时position为null，不猜测。\n");
+        sb.append("物品只可用 AcientTablet, StarSand, FlameBreath, FrostPotion, ThornAmulet, IronWhistle；重复元素表示数量。\n");
+        sb.append("祭坛不等于任务点；结合失败反馈修正位置、时间或物品组合。");
         return sb.toString();
     }
 
@@ -61,6 +67,8 @@ public final class LlmClient {
             return "";
         }
         String s = llmResp.trim();
+        JsonObject json = parseObject(s);
+        if (json != null) return string(json, "answer");
         s = s.replaceAll("```[a-zA-Z]*\\s*", "").replaceAll("```", "").trim();
         return s;
     }
@@ -70,13 +78,34 @@ public final class LlmClient {
         if (llmResp == null) {
             return "";
         }
+        JsonObject json = parseObject(llmResp);
+        if (json != null) {
+            String cmd = string(json, "command");
+            return "python".equalsIgnoreCase(string(json, "language")) && !cmd.isEmpty()
+                    ? SandboxExecutor.buildPythonCmd(cmd) : cmd;
+        }
+        if (llmResp.trim().startsWith("{") || llmResp.trim().startsWith("```json")) return "";
         Matcher m = CODE_BLOCK_PATTERN.matcher(llmResp);
         if (m.find()) {
-            String cmd = m.group(1).trim();
+            String cmd = m.group(2).trim();
             if (!cmd.isEmpty()) {
-                return cmd;
+                return "python".equals(m.group(1)) ? SandboxExecutor.buildPythonCmd(cmd) : cmd;
             }
         }
         return "";
+    }
+
+    public static JsonObject parseObject(String text) {
+        if (text == null) return null;
+        String s = text.trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
+        try {
+            JsonElement e = new JsonParser().parse(s);
+            return e.isJsonObject() ? e.getAsJsonObject() : null;
+        } catch (RuntimeException e) { return null; }
+    }
+
+    public static String string(JsonObject object, String key) {
+        JsonElement value = object.get(key);
+        return value != null && value.isJsonPrimitive() ? value.getAsString().trim() : "";
     }
 }

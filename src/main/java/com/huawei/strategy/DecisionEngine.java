@@ -15,21 +15,38 @@ import com.huawei.util.MapUtil;
  */
 public class DecisionEngine {
 
-    private final GameContext ctx = new GameContext();
+    private GameContext ctx = new GameContext();
+    private GameResponse lastResponse;
     private final DayStrategy dayStrategy = new DayStrategy();
     private final NightStrategy nightStrategy = new NightStrategy();
 
     /** 唯一入口：接收 Request，返回完整 Response */
-    public GameResponse decide(GameRequest request) {
+    public synchronized GameResponse decide(GameRequest request) {
         GameResponse response = new GameResponse();
-        if (request == null) {
+        if (request == null || request.teamOur == null || request.teamOur.roles == null
+                || request.mapInfo == null || request.mapInfo.width <= 0 || request.mapInfo.height <= 0
+                || request.mapInfo.width > 256 || request.mapInfo.height > 256) {
             return response;
         }
         try {
+            if (request.roundNo < ctx.lastRound || (ctx.lastRound >= 0
+                    && (!java.util.Objects.equals(ctx.teamType, request.teamOur.type)
+                    || !java.util.Objects.equals(ctx.teamId, request.teamOur.teamId)))) {
+                ctx = new GameContext();
+                lastResponse = null;
+            }
+            if (request.roundNo == ctx.lastRound && lastResponse != null) return lastResponse;
             initContext(request);
+            ctx.teamId = request.teamOur.teamId;
             ctx.refreshDay(request.roundNo);
             ctx.recordMines(request.mapInfo);
             ctx.weaponCount = countWeapons(request);
+            ctx.availableGold = request.teamOur.goldNum;
+            ctx.reservedTiles.clear();
+            ctx.reservedBuildings.clear();
+            ctx.plannedWeapons.clear();
+            EconomyStrategy.readNews(request, ctx);
+            StrategySupport.assignWeapons(request, ctx);
 
             Set<Integer> occupiedRoles = new HashSet<Integer>();
             if (MapUtil.isDayTime(request.roundNo)) {
@@ -41,11 +58,17 @@ public class DecisionEngine {
             // 决策异常不抛出，返回已生成的部分指令，避免响应超时
             e.printStackTrace();
         }
+        CommandValidator.validate(response, request);
+        if (request.vendorShopList != null) for (com.huawei.model.ShopItem item : request.vendorShopList)
+            if (item != null) ctx.previousPrices.put(item.name, item.price);
+        ctx.lastRound = request.roundNo;
+        lastResponse = response;
         return response;
     }
 
     /** 首回合初始化阵营与基地位置 */
     private void initContext(GameRequest request) {
+        ctx.stationPos = null;
         if (ctx.teamType == null || ctx.teamType.isEmpty()) {
             if (request.teamOur != null && request.teamOur.type != null) {
                 ctx.teamType = request.teamOur.type;

@@ -45,51 +45,42 @@ public final class MapUtil {
 
     /**
      * 考虑障碍物的下一步移动。
-     * 优先级：直接朝目标 → 纯水平 → 纯垂直 → 扫描 8 邻域取最近。
+     * BFS 八方向寻路。被占用的目标以其可达相邻格作为终点。
      * 返回 from 本身表示无法移动。
      */
     public static Pos nextStepToward(Pos from, Pos target, List<Pos> obstacles, int mapWidth, int mapHeight) {
-        if (from == null || target == null || from.equals(target)) {
+        if (from == null || target == null || !isValidPos(from, mapWidth, mapHeight)
+                || !isValidPos(target, mapWidth, mapHeight) || from.equals(target)) {
             return from;
         }
-        // 1. 直接朝目标（8 方向）
-        Pos direct = stepToward(from, target);
-        if (isValidPos(direct, mapWidth, mapHeight) && !isBlocked(direct, obstacles)) {
-            return direct;
+        boolean[][] blocked = new boolean[mapWidth][mapHeight];
+        if (obstacles != null) for (Pos p : obstacles) {
+            if (p != null && isValidPos(p, mapWidth, mapHeight)) blocked[p.x][p.y] = true;
         }
-        // 2. 纯水平
-        Pos horiz = new Pos(direct.x, from.y);
-        if (isValidPos(horiz, mapWidth, mapHeight) && !isBlocked(horiz, obstacles)) {
-            return horiz;
-        }
-        // 3. 纯垂直
-        Pos vert = new Pos(from.x, direct.y);
-        if (isValidPos(vert, mapWidth, mapHeight) && !isBlocked(vert, obstacles)) {
-            return vert;
-        }
-        // 4. 扫描 8 邻域取离目标最近的可达格
-        Pos best = from;
-        int bestDist = Integer.MAX_VALUE;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                if (dx == 0 && dy == 0) {
-                    continue;
-                }
-                Pos p = new Pos(from.x + dx, from.y + dy);
-                if (!isValidPos(p, mapWidth, mapHeight)) {
-                    continue;
-                }
-                if (isBlocked(p, obstacles)) {
-                    continue;
-                }
-                int dist = chebyshev(p, target);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = p;
+        boolean adjacentGoal = blocked[target.x][target.y];
+        boolean[][] seen = new boolean[mapWidth][mapHeight];
+        Pos[][] first = new Pos[mapWidth][mapHeight];
+        java.util.ArrayDeque<Pos> queue = new java.util.ArrayDeque<Pos>();
+        queue.add(from);
+        seen[from.x][from.y] = true;
+        while (!queue.isEmpty()) {
+            Pos p = queue.remove();
+            if (p.equals(target) || (adjacentGoal && isAdjacent(p, target))) {
+                return p.equals(from) ? from : first[p.x][p.y];
+            }
+            // 对角线夹角允许通行，规则不采用传统网格的禁止切角限制。
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    Pos next = new Pos(p.x + dx, p.y + dy);
+                    if (!isValidPos(next, mapWidth, mapHeight) || seen[next.x][next.y]
+                            || blocked[next.x][next.y]) continue;
+                    seen[next.x][next.y] = true;
+                    first[next.x][next.y] = p.equals(from) ? next : first[p.x][p.y];
+                    queue.add(next);
                 }
             }
         }
-        return best;
+        return from;
     }
 
     /** 坐标是否在地图范围内 */

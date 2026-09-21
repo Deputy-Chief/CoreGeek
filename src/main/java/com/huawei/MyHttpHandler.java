@@ -1,7 +1,8 @@
 package com.huawei;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -39,11 +40,11 @@ public class MyHttpHandler implements HttpHandler {
     /** 读取 POST Body 为 UTF-8 字符串 */
     private String getRequestBody(HttpExchange httpExchange) throws IOException {
         StringBuilder sb = new StringBuilder();
-        try (InputStream is = httpExchange.getRequestBody()) {
-            byte[] buf = new byte[8192];
+        try (Reader reader = new InputStreamReader(httpExchange.getRequestBody(), StandardCharsets.UTF_8)) {
+            char[] buf = new char[8192];
             int len;
-            while ((len = is.read(buf)) != -1) {
-                sb.append(new String(buf, 0, len, StandardCharsets.UTF_8));
+            while ((len = reader.read(buf)) != -1) {
+                sb.append(buf, 0, len);
             }
         }
         return sb.toString();

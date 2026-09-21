@@ -107,8 +107,6 @@ public final class Constants {
     // ---------- 策略参数 ----------
     /** 白天最后 10 回合（回合号%130 >= 60）起，角色回武器旁准备夜晚防守 */
     public static final int NIGHT_PREP_ROUND = 60;
-    /** 围墙血量低于该阈值时，优先使用 WallFixer 修复或围墙升级券升级回满血 */
-    public static final int WALL_REPAIR_THRESHOLD = 300;
-    /** 开拓者一次采购任务用品的种类数（每种 1 个） */
-    public static final int SHOP_TASK_ITEM_KINDS = 3;
+    /** 围墙满血回退值。接口若提供 maxHealth，则优先使用实时值。 */
+    public static final int[] WALL_MAX_HEALTH = {0, 500, 1000, 1500};
 }

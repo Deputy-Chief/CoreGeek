@@ -54,12 +54,7 @@ public final class SandboxExecutor {
 
     /** 构造 python3 -c 命令 */
     public static String buildPythonCmd(String script) {
-        String escaped = script
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\r", "")
-                .replace("\n", "\\n");
-        return "python3 -c \"" + escaped + "\"";
+        return "python3 -c '" + script.replace("'", "'\"'\"'") + "'";
     }
 
     /** 构造 shell 命令（原样返回） */
@@ -79,7 +74,7 @@ public final class SandboxExecutor {
 
         /** 非空且非超时且非判题器错误且 exitCode==0 视为成功 */
         public boolean isSuccess() {
-            return !empty && !timeout && !judgerError && exitCode == 0;
+            return !empty && !timeout && !judgerError && !truncated && exitCode == 0;
         }
     }
 }

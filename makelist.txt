@@ -17,6 +17,9 @@ main/java/com/huawei/model/GameResponse.java
 main/java/com/huawei/model/RoleCommand.java
 main/java/com/huawei/model/GameContext.java
 main/java/com/huawei/strategy/DecisionEngine.java
+main/java/com/huawei/strategy/StrategySupport.java
+main/java/com/huawei/strategy/EconomyStrategy.java
+main/java/com/huawei/strategy/CommandValidator.java
 main/java/com/huawei/strategy/DayStrategy.java
 main/java/com/huawei/strategy/NightStrategy.java
 main/java/com/huawei/strategy/WorkerStrategy.java
